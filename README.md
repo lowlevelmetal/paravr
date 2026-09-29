@@ -1,62 +1,30 @@
 # paravr - Parallel Port AVR Programmer
 
-A simple, dependency-free AVR ISP programmer for Linux using a real parallel port.
-Supports both onboard LPT ports and PCI/PCIe parallel port cards.
+A small, dependency-free AVR ISP programmer for Linux using a real parallel port,
+either onboard or a PCI/PCIe card.
 
-## Features
-
-- **Zero dependencies** - Uses only Python standard library and Linux ppdev
-- **Auto-detection** - Automatically finds the correct configuration for your hardware
-- **PCI card support** - Works with add-in parallel port cards (which often have non-standard behavior)
-- **Configuration saving** - Saves working config so you don't need to specify options every time
-- **Intel HEX support** - Programs standard .hex files from Arduino IDE, avr-gcc, etc.
+- **Auto-detection** finds the MISO pin, signal polarity and fastest working clock
+- **Saved settings** so you don't need to pass options every time
+- **Target identified by signature**, no need to name the MCU
+- **Intel HEX** files from the Arduino IDE, avr-gcc, PlatformIO, etc.
 
 ## Requirements
 
 - Linux with the `ppdev` kernel module
-- A **real** parallel port (USB-to-parallel adapters will NOT work)
-- Python 3.7+
-- Root access (or appropriate permissions for `/dev/parport0`)
+- A **real** parallel port. USB-to-parallel adapters only speak the printer
+  protocol and can't bit-bang SPI.
+- A C++17 compiler and `make`
+- Root, or membership in the `lp` group
+
+## Building
+
+```bash
+make
+sudo make install    # optional, installs to /usr/local/bin
+```
 
 ## Wiring
 
-Connect your parallel port to the AVR's ISP header:
-
-```
-DB-25 Parallel Port          AVR / Arduino Uno
-───────────────────          ─────────────────
-Pin 2  (D0)           →      MOSI  (Arduino pin 11)
-Pin 3  (D1)           →      SCK   (Arduino pin 13)
-Pin 4  (D2)           →      RESET (Arduino RESET pin)
-Pin 10 (ACK/S6)       ←      MISO  (Arduino pin 12)
-Pin 18-25 (GND)       →      GND
-
-      DB-25 Female                ICSP Header
-    (directly on cable)          (on Arduino)
-                              
-    13 12 11 10  9  8  7         MISO ● ○ VCC
-     ○  ○  ○  ○  ○  ○  ○          SCK ○ ○ MOSI
-                                RESET ○ ○ GND
-    25 24 23 22 21 20 19 18
-     ○  ○  ○  ○  ○  ○  ○  ○
-           (all GND)
-     
-     1  2  3  4  5  6  7  8
-     ○  ●  ●  ●  ○  ○  ○  ○
-        │  │  │
-        │  │  └── RESET (D2)
-        │  └───── SCK   (D1)
-        └──────── MOSI  (D0)
-```
-
-### Making a Cable
-
-You'll need:
-- DB-25 male connector (or female if connecting to extension cable)
-- 5 wires (4 signal + ground)
-- 2x3 pin header for ICSP, or individual Dupont wires
-
-Connections:
 | DB-25 Pin | Signal | AVR Pin | Arduino Uno |
 |-----------|--------|---------|-------------|
 | 2         | MOSI   | MOSI    | Pin 11      |
@@ -65,234 +33,128 @@ Connections:
 | 10        | MISO   | MISO    | Pin 12      |
 | 18-25     | GND    | GND     | GND         |
 
+The AVR's 6-pin ICSP header (as on the Arduino) looks like this from above:
+
+```
+MISO  1 ● ○ 2  VCC
+SCK   3 ○ ○ 4  MOSI
+RESET 5 ○ ○ 6  GND
+```
+
+The target must be powered separately (e.g. by USB); the parallel port does not supply VCC.
+
 ## Quick Start
 
-### 1. Load the ppdev module
-
 ```bash
-sudo modprobe ppdev
+sudo modprobe ppdev              # add "ppdev" to /etc/modules-load.d/ppdev.conf to load at boot
+sudo ./paravr --detect           # find and save working settings
+sudo ./paravr --hex firmware.hex # program
 ```
 
-To load automatically on boot, add to `/etc/modules-load.d/ppdev.conf`:
-```
-ppdev
-```
-
-### 2. Auto-detect your configuration
-
-```bash
-sudo python3 paravr.py --detect
-```
-
-This tests various configurations and saves the working one.
-
-### 3. Program your AVR
-
-```bash
-sudo python3 paravr.py --hex firmware.hex
-```
+With the standard wiring above and a standard port, `--detect` is optional; it
+also finds the fastest clock your setup handles.
 
 ## Usage
 
-### Auto-Detection (First Time Setup)
-
 ```bash
-sudo python3 paravr.py --detect
-```
+# Program (erase, write, verify)
+sudo ./paravr --hex firmware.hex
 
-This will:
-1. Test all MISO pin configurations
-2. Test various speeds
-3. Find and save the working configuration
+# Skip verification (faster) or erasing
+sudo ./paravr --hex firmware.hex --no-verify
+sudo ./paravr --hex firmware.hex --no-erase
 
-### Programming
+# Program a part that is not in --list-mcus, or whose signature doesn't match
+sudo ./paravr --hex firmware.hex --mcu m328p
 
-```bash
-# Program with auto-detected config
-sudo python3 paravr.py --hex firmware.hex
+# Read fuse and lock bytes
+sudo ./paravr --fuses
 
-# Program a specific MCU (default is ATmega328P)
-sudo python3 paravr.py --hex firmware.hex --mcu m168p
+# Toggle the output pins (watch the SCK LED on Arduino pin 13) and show the status register
+sudo ./paravr --test
 
-# Skip verification (faster but less safe)
-sudo python3 paravr.py --hex firmware.hex --no-verify
-
-# Force program even if signature doesn't match
-sudo python3 paravr.py --hex firmware.hex --force
-```
-
-### Reading Fuses
-
-```bash
-sudo python3 paravr.py --fuses
-```
-
-### Testing the Parallel Port
-
-```bash
-sudo python3 paravr.py --test
-```
-
-This toggles the output pins - watch for the SCK LED (pin 13) blinking on Arduino.
-
-### Manual Configuration
-
-If auto-detect doesn't work, you can specify options manually:
-
-```bash
-# Standard onboard parallel port
-sudo python3 paravr.py --hex firmware.hex --miso 10
-
-# PCI parallel port card (no STATUS inversion)
-sudo python3 paravr.py --hex firmware.hex --miso 100
-
-# With slower speed
-sudo python3 paravr.py --hex firmware.hex --miso 100 --speed 500
-```
-
-### List Options
-
-```bash
 # List supported MCUs
-sudo python3 paravr.py --list-mcus
-
-# List MISO configurations  
-sudo python3 paravr.py --list-miso
+./paravr --list-mcus
 ```
 
-## MISO Configurations
+Options given on the command line override the saved settings, e.g.
+`--speed 500` to try a slower clock or `--port /dev/parport1` for a second port.
 
-Different parallel ports map the MISO input differently:
+## MISO Pin and Polarity
 
-| ID  | Description | Use When |
-|-----|-------------|----------|
-| 10  | Pin 10, inverted | Standard onboard LPT ports |
-| 100 | Pin 10, not inverted | Most PCI/PCIe parallel cards |
-| 11  | Pin 11, inverted | MISO wired to BUSY pin |
-| 101 | Pin 11, not inverted | PCI card with MISO on BUSY |
-
-Run `--detect` to automatically find the correct one.
+MISO can be wired to any of the status pins 10, 11, 12, 13 or 15 (`--miso PIN`,
+default 10). A standard port inverts BUSY (pin 11) in hardware and no other
+status input; paravr accounts for that. If a card deviates from the standard,
+add `--invert-miso`. `--detect` tries every pin both ways, and both RESET
+polarities (`--invert-reset`, for a RESET line driven through an inverter).
 
 ## Supported MCUs
 
-| ID | Name | Flash | EEPROM |
-|----|------|-------|--------|
-| m328p | ATmega328P | 32K | 1K |
-| m328 | ATmega328 | 32K | 1K |
-| m168p | ATmega168P | 16K | 512 |
-| m168 | ATmega168 | 16K | 512 |
-| m88p | ATmega88P | 8K | 512 |
-| m88 | ATmega88 | 8K | 512 |
-| m48p | ATmega48P | 4K | 256 |
-| m48 | ATmega48 | 4K | 256 |
-| m2560 | ATmega2560 | 256K | 4K |
-| m1280 | ATmega1280 | 128K | 4K |
-| m32u4 | ATmega32U4 | 32K | 1K |
-| t85 | ATtiny85 | 8K | 512 |
-| t45 | ATtiny45 | 4K | 256 |
-| t25 | ATtiny25 | 2K | 128 |
-| t84 | ATtiny84 | 8K | 512 |
-| t44 | ATtiny44 | 4K | 256 |
-| t24 | ATtiny24 | 2K | 128 |
-| t2313 | ATtiny2313 | 2K | 128 |
+| ID | Name | Flash |
+|----|------|-------|
+| m328p | ATmega328P | 32K |
+| m328 | ATmega328 | 32K |
+| m168p | ATmega168P | 16K |
+| m168 | ATmega168 | 16K |
+| m88p | ATmega88P | 8K |
+| m88 | ATmega88 | 8K |
+| m48p | ATmega48P | 4K |
+| m48 | ATmega48 | 4K |
+| m2560 | ATmega2560 | 256K |
+| m1280 | ATmega1280 | 128K |
+| m32u4 | ATmega32U4 | 32K |
+| t85 | ATtiny85 | 8K |
+| t45 | ATtiny45 | 4K |
+| t25 | ATtiny25 | 2K |
+| t84 | ATtiny84 | 8K |
+| t44 | ATtiny44 | 4K |
+| t24 | ATtiny24 | 2K |
+| t2313 | ATtiny2313 | 2K |
 
 ## Troubleshooting
 
-### "Permission denied for /dev/parport0"
+**`/dev/parport0: Permission denied`**: run with `sudo`, or add yourself to
+the `lp` group (`sudo usermod -a -G lp $USER`, then log in again).
 
-Run with `sudo`, or add yourself to the `lp` group:
-```bash
-sudo usermod -a -G lp $USER
-# Log out and back in
-```
+**`/dev/parport0: No such file or directory`**: load the module with `sudo modprobe ppdev`.
 
-### "/dev/parport0 not found"
+**`target not responding`**:
 
-Load the ppdev module:
-```bash
-sudo modprobe ppdev
-```
+1. Is the target powered, and is GND connected (DB-25 pins 18-25)?
+2. Check the four signal wires.
+3. Try a slower clock: `--speed 500` or `--speed 1000`.
+4. Run `--detect`.
 
-### "Failed to enter programming mode"
+**`No working settings found`**: check the wiring with a multimeter, and make
+sure the AVR has a working clock source (a chip fused for an external crystal
+needs one).
 
-1. **Check power** - Is the Arduino/AVR powered? (USB connected)
-2. **Check ground** - GND must be connected (DB-25 pins 18-25)
-3. **Check wiring** - Verify all 4 signal wires are correct
-4. **Try slower speed** - `--speed 500` or `--speed 1000`
-5. **Run --detect** - Let it find the correct configuration
-
-### "No working configuration found"
-
-- Verify wiring with a multimeter
-- Make sure the AVR has a working clock (external crystal or internal)
-- Try pressing the reset button on Arduino while running --detect
-- Check that you're using a REAL parallel port (USB adapters don't work)
-
-### PCI Parallel Port Cards
-
-Many PCI/PCIe parallel port cards don't implement hardware inversion on STATUS bits.
-Run `--detect` which will try both inverted and non-inverted configurations.
-
-Common cards that work:
-- Asix AX99100 based cards
-- MosChip MCS9900 based cards
-- Most "native" PCIe parallel cards
+**`verification failed`**: try a slower `--speed`.
 
 ## Getting .hex Files
 
-### From Arduino IDE
-
-1. Open your sketch
-2. Sketch → Export compiled Binary
-3. Find the `.hex` file in your sketch folder
-
-### From avr-gcc
-
-```bash
-avr-gcc -mmcu=atmega328p -o firmware.elf firmware.c
-avr-objcopy -O ihex firmware.elf firmware.hex
-```
-
-### From PlatformIO
-
-```bash
-pio run
-# .hex file is in .pio/build/*/firmware.hex
-```
+- **Arduino IDE**: Sketch → Export Compiled Binary; the `.hex` is in the sketch folder.
+- **avr-gcc**: `avr-objcopy -O ihex -j .text -j .data firmware.elf firmware.hex`
+- **PlatformIO**: `pio run`; the file is `.pio/build/*/firmware.hex`.
 
 ## Configuration File
 
-Auto-detected settings are saved to:
-```
-~/.config/paravr/config.json
-```
+`--detect` saves settings per port in `~/.config/paravr/config` (under `sudo`,
+that is root's home):
 
-Format:
-```json
-{
-  "/dev/parport0": {
-    "miso_config": 100,
-    "speed_us": 100,
-    "invert_reset": false
-  }
-}
+```
+# device miso-pin invert-miso speed-us invert-reset
+/dev/parport0 10 0 50 0
 ```
 
 ## How It Works
 
-This programmer uses "bit-banging" - directly controlling the parallel port's
-DATA pins to generate the SPI signals (MOSI, SCK, RESET) and reading the STATUS
-register for MISO.
-
-The parallel port is accessed via Linux's `ppdev` interface, which provides
-user-space access to the port's registers through ioctl calls.
-
-### Why USB Adapters Don't Work
-
-USB-to-parallel adapters only implement the printer protocol, not direct
-register access. They can't bit-bang SPI signals fast enough or read inputs
-in real-time.
+paravr bit-bangs SPI: it drives MOSI, SCK and RESET on the port's DATA pins and
+reads MISO from the STATUS register, using the Linux `ppdev` ioctl interface. On
+top of that it speaks the AVR serial programming protocol: Programming Enable,
+signature and fuse reads, chip erase, and page-wise flash writes with read-back
+verification.
 
 ## License
 
-MIT License - See source file for details.
+MIT
