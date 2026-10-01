@@ -13,15 +13,30 @@ either onboard or a PCI/PCIe card.
 - Linux with the `ppdev` kernel module
 - A **real** parallel port. USB-to-parallel adapters only speak the printer
   protocol and can't bit-bang SPI.
-- A C++17 compiler and `make`
+- A C++17 compiler and CMake 3.16 or newer
 - Root, or membership in the `lp` group
 
 ## Building
 
 ```bash
-make
-sudo make install    # optional, installs to /usr/local/bin
+cmake -B build
+cmake --build build
+sudo cmake --install build    # optional, installs paravr to /usr/local/bin
 ```
+
+The examples below assume paravr is installed; otherwise run `./build/paravr`.
+To install elsewhere, configure with `-DCMAKE_INSTALL_PREFIX=...`.
+
+### Tests
+
+```bash
+ctest --test-dir build
+```
+
+The tests need no hardware. Besides unit tests, they run the `paravr` binary
+against a simulated AVR (`tests/avrsim`) that is preloaded in place of
+`/dev/parport0`, covering detection, programming, verification and fuses.
+Configure with `-DPARAVR_BUILD_TESTS=OFF` to skip them.
 
 ## Wiring
 
@@ -47,8 +62,8 @@ The target must be powered separately (e.g. by USB); the parallel port does not 
 
 ```bash
 sudo modprobe ppdev              # add "ppdev" to /etc/modules-load.d/ppdev.conf to load at boot
-sudo ./paravr --detect           # find and save working settings
-sudo ./paravr --hex firmware.hex # program
+sudo paravr --detect           # find and save working settings
+sudo paravr --hex firmware.hex # program
 ```
 
 With the standard wiring above and a standard port, `--detect` is optional; it
@@ -58,23 +73,23 @@ also finds the fastest clock your setup handles.
 
 ```bash
 # Program (erase, write, verify)
-sudo ./paravr --hex firmware.hex
+sudo paravr --hex firmware.hex
 
 # Skip verification (faster) or erasing
-sudo ./paravr --hex firmware.hex --no-verify
-sudo ./paravr --hex firmware.hex --no-erase
+sudo paravr --hex firmware.hex --no-verify
+sudo paravr --hex firmware.hex --no-erase
 
 # Program a part that is not in --list-mcus, or whose signature doesn't match
-sudo ./paravr --hex firmware.hex --mcu m328p
+sudo paravr --hex firmware.hex --mcu m328p
 
 # Read fuse and lock bytes
-sudo ./paravr --fuses
+sudo paravr --fuses
 
 # Toggle the output pins (watch the SCK LED on Arduino pin 13) and show the status register
-sudo ./paravr --test
+sudo paravr --test
 
 # List supported MCUs
-./paravr --list-mcus
+paravr --list-mcus
 ```
 
 Options given on the command line override the saved settings, e.g.
@@ -154,6 +169,19 @@ reads MISO from the STATUS register, using the Linux `ppdev` ioctl interface. On
 top of that it speaks the AVR serial programming protocol: Programming Enable,
 signature and fuse reads, chip erase, and page-wise flash writes with read-back
 verification.
+
+## Project Layout
+
+```
+include/paravr/   core library interface
+  port.hpp          ppdev parallel port access
+  isp.hpp           AVR serial programming protocol
+  hex.hpp           Intel HEX parsing
+  mcu.hpp           supported MCUs
+  settings.hpp      wiring settings and the config file
+src/              core library and the command-line tool (main.cpp, commands.cpp)
+tests/            unit tests, end-to-end CLI tests and the avrsim target simulator
+```
 
 ## License
 
